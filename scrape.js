@@ -40,8 +40,6 @@ request.get('http://citybeerstore.com/menu/', function (err, res) {
     });
   });
 
-  console.log(beers);
-
   var changes = diff(knownBeers, beers);
 
   function next () {
@@ -63,7 +61,9 @@ request.get('http://citybeerstore.com/menu/', function (err, res) {
 
   function ontweet (err, data, response) {
     if (err) throw err;
+
     console.log(data);
+
     // wait 5 seconds to avoid a potential Twitter rate limiter
     setTimeout(next, 5000);
   }
