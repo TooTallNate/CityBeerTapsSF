@@ -1,0 +1,23 @@
+{
+  "name": "citybeerstore",
+  "version": "1.0.0",
+  "description": "Scape City Beer Store's Tap list and tweet when a new beer comes on tap",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)",
+  "license": "MIT",
+  "dependencies": {
+    "cheerio": "0.18.0",
+    "mongo-diff": "0.1.0",
+    "superagent": "0.21.0",
+    "twit": "1.1.19"
+  },
+  "devDependencies": {
+    "colors": "~1.0.3",
+    "oauth": "~0.9.12",
+    "optimist": "~0.6.1",
+    "step": "0.0.5"
+  }
+}
