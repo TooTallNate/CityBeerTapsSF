@@ -7,7 +7,6 @@ var argv = require('optimist')
 ;
 
 var OAuth = require('oauth').OAuth;
-var Step = require('step');
 var colors = require('colors');
 
 var REQUEST_TOKEN_URL = 'https://api.twitter.com/oauth/request_token';
