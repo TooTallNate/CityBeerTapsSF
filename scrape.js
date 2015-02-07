@@ -40,17 +40,22 @@ request.get('http://citybeerstore.com/menu/', function (err, res) {
     });
   });
 
-  var changes = diff(knownBeers, beers);
+  var list = beers.slice();
+
+  function beerIsKnown (beer, beers) {
+    return beers.some(function (b) {
+      return b.name === beer.name &&
+        b.brewery === beer.brewery;
+    });
+  }
 
   function next () {
-    if (!changes.length) return finish();
-    var op = changes.shift();
-    var name = op[0];
-    var val = op[1];
+    if (!list.length) return finish();
+    var beer = list.shift();
 
-    if ('push' === name) {
+    if (!beerIsKnown(beer, knownBeers)) {
       // make this more interesting?
-      var tweet = val.brewery + '\n' + val.name;
+      var tweet = beer.brewery + '\n' + beer.name;
 
       var twit = new Twit(require('./auth'));
       twit.post('statuses/update', { status: tweet }, ontweet);
