@@ -1,7 +1,6 @@
 
 var fs = require('fs');
 var Twit = require('twit');
-var diff = require('mongo-diff');
 var request = require('superagent');
 var cheerio = require('cheerio');
 
