@@ -1,3 +1,5 @@
+#!/usr/bin/env node --harmony-generators
+'use strict';
 
 var fs = require('fs');
 var Twit = require('twit');
