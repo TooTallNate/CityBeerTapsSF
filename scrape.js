@@ -1,6 +1,8 @@
 
 var fs = require('fs');
 var Twit = require('twit');
+var suspend = require('suspend');
+var resume = suspend.resume;
 var request = require('superagent');
 var cheerio = require('cheerio');
 
@@ -13,11 +15,30 @@ try {
   knownBeers = [];
 }
 
-request.get('http://citybeerstore.com/menu/', function (err, res) {
-  if (err) throw err;
+function beerIsKnown (beer, beers) {
+  return beers.some(function (b) {
+    return b.name === beer.name &&
+      b.brewery === beer.brewery;
+  });
+}
+
+// necessary because superagent kind of sucks, and it checks the arity of
+// the callback function
+function resumeSA () {
+  var done = resume();
+  return function (err, res) {
+    if (err) return done(err);
+    done(null, res);
+  };
+}
+
+suspend.run(function* () {
+  var res = yield request.get('http://citybeerstore.com/menu/', resumeSA());
+
   var $ = cheerio.load(res.text);
   var ul = $('.taps ul.beers');
   var lis = ul.find('li.beer');
+
   var beers = [];
   lis.each(function (n, li) {
     var brewery = $(li).find('.brewery').text().trim();
@@ -39,47 +60,26 @@ request.get('http://citybeerstore.com/menu/', function (err, res) {
     });
   });
 
-  var list = beers.slice();
-
-  function beerIsKnown (beer, beers) {
-    return beers.some(function (b) {
-      return b.name === beer.name &&
-        b.brewery === beer.brewery;
-    });
-  }
-
-  function next () {
-    if (!list.length) return finish();
-    var beer = list.shift();
+  for (var i = 0; i < beers.length; i++) {
+    var beer = beers[i];
 
     if (!beerIsKnown(beer, knownBeers)) {
       // make this more interesting?
       var tweet = beer.brewery + '\n' + beer.name;
 
-      var twit = new Twit(require('./auth'));
-      twit.post('statuses/update', { status: tweet }, ontweet);
-    } else {
-      next();
+      //var twit = new Twit(require('./auth'));
+      //yield twit.post('statuses/update', { status: tweet }, resume());
+
+      //console.log(data);
+
+      //// wait 5 seconds to avoid a potential Twitter rate limiter
+      //yield setTimeout(resume(), 5000);
+      console.log(tweet);
+      console.log();
     }
   }
 
-  function ontweet (err, data, response) {
-    if (err) throw err;
-
-    console.log(data);
-
-    // wait 5 seconds to avoid a potential Twitter rate limiter
-    setTimeout(next, 5000);
-  }
-
-  function finish () {
-    // save down the "known" beers list for next run
-    fs.writeFile(knownFilename, JSON.stringify(beers, null, 2) + '\n', function (err) {
-      if (err) throw err;
-    });
-  }
-
-  next();
+  // save down the "known" beers list for next run
+  //var json = JSON.stringify(beers, null, 2) + '\n';
+  //yield fs.writeFile(knownFilename, json, resume());
 });
-
-
