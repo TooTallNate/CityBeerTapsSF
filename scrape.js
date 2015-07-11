@@ -138,11 +138,17 @@ suspend.run(function* () {
       }
 
       // finally do the damn tweet!
-      var data = yield twit.post('statuses/update', { status: tweet }, resume());
-      console.log(data);
+      var data;
+      try {
+        data = yield twit.post('statuses/update', { status: tweet }, resume());
+        console.log(data);
+      } catch (e) {
+        console.log('tweet failed!\n%s', tweet);
+        console.log(e);
+      }
 
       // wait 5 seconds to avoid a potential Twitter/Untappd rate limiters
-      yield setTimeout(resume(), 5000);
+      if (data) yield setTimeout(resume(), 5000);
     }
   }
 
