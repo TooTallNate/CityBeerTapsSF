@@ -1,158 +1,156 @@
-#!/usr/bin/env node --harmony-generators
+#!/usr/bin/env node
 'use strict';
+const ms = require('ms');
+const Twit = require('twit');
+const fs = require('fs-extra');
+const fetch = require('node-fetch');
+const cheerio = require('cheerio');
+const sleep = require('then-sleep');
+const { inspect } = require('util');
+const Untappd = require('node-untappd');
 
-var fs = require('fs');
-var Twit = require('twit');
-var suspend = require('suspend');
-var resume = suspend.resume;
-var request = require('superagent');
-var cheerio = require('cheerio');
-var Untappd = require('node-untappd');
+const twit = new Twit(require('./twitter-auth'));
 
 // https://dev.twitter.com/overview/api/counting-characters
-var MAX_TWEET = 140;
+const MAX_TWEET = 140;
 
 // https://dev.twitter.com/overview/t.co
 // https://support.twitter.com/articles/78124-posting-links-in-a-tweet
-var TWEET_URL_COUNT = 22;
+const TWEET_URL_COUNT = 22;
 
-// words to NOT include in the Untappd API beer search query
-var blacklist = [
-  'beer',
-  'brewery',
-  'brewing',
-  'company',
-  'the',
-  'on',
-  'and',
-  'nitro'
-];
+// https://untappd.com/v/city-beer-store/3595
+const VENUE_ID = 3595;
+const VENUE_URL = 'https://untappd.com/v/city-beer-store/3595';
 
-var knownFilename = __dirname + '/known.json';
-var knownBeers;
+const knownFilename = __dirname + '/known.json';
 
+let knownBeers;
 try {
-  knownBeers = require(knownFilename);
+  knownBeers = new Set(require(knownFilename));
 } catch (e) {
-  knownBeers = [];
+  knownBeers = new Set();
 }
 
-function beerIsKnown (beer, beers) {
-  return beers.some(function (b) {
-    return b.name === beer.name &&
-      b.brewery === beer.brewery;
+const untappdBeerURL = beer =>
+  `https://untappd.com/b/${beer.beer_slug}/${beer.bid}`;
+
+async function getMoreMenu(venueId, index, sectionId) {
+  const url = `https://untappd.com/venue/more_menu/${venueId}/${
+    index
+  }?section_id=${sectionId}`;
+  const res = await fetch(url, {
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest'
+    }
   });
+  const body = await res.json();
+  const $ = cheerio.load(body.view);
+  return getBeers($);
 }
 
-// necessary because superagent kind of sucks, and it checks the arity of
-// the callback function, and will incorrectly give the `res` as the `err`…
-function resumeSA () {
-  var done = resume();
-  return function (err, res) {
-    if (err) return done(err);
-    done(null, res);
-  };
+function getBeers($) {
+  const beers = $('.beer-info');
+  const ids = Array.from(
+    $('.beer-info .beer-details a[data-href=":beer"]')
+  ).map(a =>
+    Number(
+      $(a)
+        .attr('href')
+        .split('/')
+        .pop()
+    )
+  );
+  return ids;
 }
 
-suspend.run(function* () {
-  var twit = new Twit(require('./twitter-auth'));
+async function tweetBeer(beer) {
+  //console.log(beer);
+  let tweet = `${beer.beer_name}\n${beer.brewery.brewery_name}`;
 
-  var untappd = new Untappd();
-  var untappdAuth = require('./untappd-auth');
+  if (beer.beer_abv) {
+    const abv = '\nABV: ' + beer.beer_abv + '%';
+    if (tweet.length + TWEET_URL_COUNT + 1 + abv.length <= MAX_TWEET) {
+      tweet += abv;
+    }
+  }
+  if (beer.beer_ibu) {
+    const ibu = '\nIBUs: ' + beer.beer_ibu;
+    if (tweet.length + TWEET_URL_COUNT + 1 + ibu.length <= MAX_TWEET) {
+      tweet += ibu;
+    }
+  }
+  if (beer.rating_score) {
+    let rating = '\n';
+    const rounded = Math.round(beer.rating_score);
+    for (let i = 0; i < 5; i++) {
+      rating += i < rounded ? '★' : '☆';
+    }
+    if (tweet.length + TWEET_URL_COUNT + 1 + rating.length <= MAX_TWEET) {
+      tweet += rating;
+    }
+  }
+  if (tweet.length + TWEET_URL_COUNT + 1 <= MAX_TWEET) {
+    tweet += '\n' + untappdBeerURL(beer);
+  }
+
+  //console.log('-------------------------------')
+  //console.log(tweet)
+  //console.log('-------------------------------')
+
+  // finally do the damn tweet!
+  try {
+    const data = await twit.post('statuses/update', { status: tweet });
+    console.log(data);
+  } catch (e) {
+    console.log('tweet failed!\n%s', tweet);
+    console.log(e);
+  }
+}
+
+const wrap = fn => (...args) =>
+  new Promise((resolve, reject) =>
+    fn((err, res) => (err ? reject(err) : resolve(res.response)), ...args)
+  );
+
+async function main() {
+  const untappd = new Untappd();
+  const untappdAuth = require('./untappd-auth');
   untappd.setClientId(untappdAuth.clientId);
   untappd.setClientSecret(untappdAuth.clientSecret);
 
-  var res = yield request.get('http://citybeerstore.com/menu/', resumeSA());
+  const getBeerInfo = wrap(untappd.beerInfo.bind(untappd));
 
-  var $ = cheerio.load(res.text);
-  var ul = $('.taps ul.beers');
-  var lis = ul.find('li.beer');
+  const res = await fetch(VENUE_URL);
+  const body = await res.text();
+  const $ = cheerio.load(body);
+  const sectionId = $('.menu-section-list')
+    .attr('id')
+    .split('-')
+    .pop();
+  //console.log({ sectionId });
 
-  var beers = [];
-  lis.each(function (n, li) {
-    var brewery = $(li).find('.brewery').text().trim();
-    var name = $(li).find('.name').text().trim();
-    var notes = $(li).find('.tasting-notes').text().trim();
+  const firstBeers = getBeers($);
+  //console.log({ firstBeers });
 
-    var dash = name.indexOf('-');
-    if (-1 !== dash) {
-      // sometimes they separate the "name" and description
-      // of the beer with a hyphen. give the leftover to `notes`
-      notes = name.substring(dash + 1) + notes;
-      name = name.substring(0, dash);
-    }
+  const more = await getMoreMenu(VENUE_ID, firstBeers.length, sectionId);
+  //console.log({ more });
 
-    beers.push({
-      brewery: brewery,
-      name: name,
-      notes: notes
-    });
-  });
+  const beers = new Set([...firstBeers, ...more]);
+  //console.log({ beers, count: beers.size });
 
-  for (var i = 0; i < beers.length; i++) {
-    var beer = beers[i];
+  const newBeers = Array.from(beers).filter(bid => !knownBeers.has(bid));
 
-    if (!beerIsKnown(beer, knownBeers)) {
-      var tweet = beer.brewery + '\n' + beer.name;
-
-      // try to get an Untappd beer search match,
-      // lowercasing the brewery and beer name, and removing common
-      // words to try and get better search result matches
-      var query = (beer.brewery + ' ' + beer.name)
-        .toLowerCase()
-        .match(/\S+/g)
-        .filter(function (word) {
-          return -1 === blacklist.indexOf(word);
-        })
-        .join(' ');
-
-      res = yield untappd.searchBeer(resume(), query);
-
-      // if we got an Untappd API match, then attempt to include the
-      // ABV, IBUs and URL to the beer on Untappd in the tweep
-      if (res.response.found > 0) {
-        var match = res.response.beers.items[0].beer;
-        var url = 'https://untappd.com/beer/' + match.bid;
-
-        // attempt to resolve the unsatisfying url to one with a nice slug
-        res = yield request.head(url, resumeSA());
-        if (res.headers.location) {
-          url = res.headers.location;
-        }
-
-        if (match.beer_abv) {
-          var abv = '\nABV: ' + match.beer_abv + '%';
-          if (tweet.length + TWEET_URL_COUNT + 1 + abv.length <= MAX_TWEET) {
-            tweet += abv;
-          }
-        }
-        if (match.beer_ibu) {
-          var ibu = '\nIBUs: ' + match.beer_ibu;
-          if (tweet.length + TWEET_URL_COUNT + 1 + ibu.length <= MAX_TWEET) {
-            tweet += ibu;
-          }
-        }
-        if (tweet.length + TWEET_URL_COUNT + 1 <= MAX_TWEET) {
-          tweet += '\n' + url;
-        }
-      }
-
-      // finally do the damn tweet!
-      var data;
-      try {
-        data = yield twit.post('statuses/update', { status: tweet }, resume());
-        console.log(data);
-      } catch (e) {
-        console.log('tweet failed!\n%s', tweet);
-        console.log(e);
-      }
-
-      // wait 5 seconds to avoid a potential Twitter/Untappd rate limiters
-      if (data) yield setTimeout(resume(), 5000);
-    }
+  for (const BID of newBeers) {
+    const { beer } = await getBeerInfo({ BID });
+    await tweetBeer(beer);
+    await sleep(ms('5s'));
   }
 
   // save down the "known" beers list for next run
-  var json = JSON.stringify(beers, null, 2) + '\n';
-  yield fs.writeFile(knownFilename, json, resume());
+  await fs.writeJSON(knownFilename, Array.from(beers));
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
 });
